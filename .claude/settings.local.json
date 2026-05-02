@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m compileall app/ -q)",
+      "Bash(python -c ' *)"
+    ]
+  }
+}

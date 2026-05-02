@@ -1,0 +1,25 @@
+# Dependencies - exclude node_modules from build
+apps/web/node_modules
+apps/web/.next
+apps/web/out
+
+# Logs
+npm-debug.log
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+
+# Python
+__pycache__
+*.pyc
+.pytest_cache
