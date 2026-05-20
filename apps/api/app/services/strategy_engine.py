@@ -1,9 +1,12 @@
 """
+DEPRECATED — superseded by services/strategy/pipeline.py + services/strategy/stages/.
+This file is kept only for git-blame history.  It is NOT imported anywhere.
+
 Strategy engine — multi-signal, regime-filtered, ML-augmented trading.
 
 Signal stack (in order of application):
   1. Regime filter     — 2-state HMM; blocks trades in CHOPPY regime (halves size)
-  2. EMA crossover     — directional trigger (existing)
+  2. EMA crossover     — true exponential moving average crossover (directional trigger)
   3. HAR-RV vol sizing — replaces ARCH/GARCH for vol forecast when ≥ 30 daily bars
   4. Fractional Kelly  — 25% Kelly instead of full Kelly (reduces ruin probability)
   5. Cross-sectional momentum — adjusts allocation weight by 12-1m momentum rank
@@ -67,6 +70,23 @@ class StrategyEngine:
         if isinstance(value, str):
             return value.strip().lower() in {"1", "true", "yes", "on"}
         return bool(value)
+
+    @staticmethod
+    def _ema(prices: list[float], window: int) -> float:
+        """True exponential moving average over the full price series.
+
+        α = 2/(N+1) weights recent bars geometrically more than distant ones.
+        Computing over the full series (not a slice) ensures the EMA has
+        properly decayed memory — slicing the last N bars would make it
+        equivalent to a simple moving average.
+        """
+        if not prices:
+            return 0.0
+        alpha = 2.0 / (window + 1)
+        ema = prices[0]
+        for price in prices[1:]:
+            ema = alpha * price + (1.0 - alpha) * ema
+        return ema
 
     @staticmethod
     def _clamp(value: float, lo: float, hi: float) -> float:
@@ -137,9 +157,9 @@ class StrategyEngine:
             if len(closes) < slow:
                 continue
 
-            # 1. EMA crossover signal
-            fast_ma = fmean(closes[-fast:])
-            slow_ma = fmean(closes[-slow:])
+            # 1. True EMA crossover signal (computed over full history, not a slice)
+            fast_ma = StrategyEngine._ema(closes, fast)
+            slow_ma = StrategyEngine._ema(closes, slow)
             signal_state = 1 if fast_ma > slow_ma else -1
             prev_state = self._regime_state.get(symbol)
             self._regime_state[symbol] = signal_state

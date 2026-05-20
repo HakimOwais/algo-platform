@@ -1,3 +1,6 @@
+# DEPRECATED — superseded by infra/market_data/sim.py (SimMarketData).
+# Kept for git history only. Not imported anywhere.
+
 import asyncio
 import random
 from collections import defaultdict, deque
@@ -12,6 +15,8 @@ from app.models.instrument import Instrument
 
 
 class MarketDataService:
+    is_live_feed: bool = False  # sim mode — strategy runs 24/7, no market hours gate
+
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession],

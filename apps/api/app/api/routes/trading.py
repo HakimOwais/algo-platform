@@ -1,11 +1,7 @@
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
 
 from app.api.deps import get_container
 from app.core.container import ServiceContainer
-from app.models.decision_log import DecisionLog
-from app.models.fill import Fill
-from app.models.order import Order
 from app.schemas.trading import (
     DecisionLogRead,
     FillRead,
@@ -37,23 +33,26 @@ async def create_order(
 
 
 @router.get("/orders", response_model=list[OrderRead])
-async def list_orders(container: ServiceContainer = Depends(get_container), limit: int = 100) -> list[OrderRead]:
-    async with container.order_manager.session_factory() as session:
-        result = await session.execute(select(Order).order_by(Order.requested_at.desc()).limit(limit))
-        return list(result.scalars().all())
+async def list_orders(
+    container: ServiceContainer = Depends(get_container),
+    limit: int = 100,
+) -> list[OrderRead]:
+    return list(await container.orders.list_recent(limit))
 
 
 @router.get("/fills", response_model=list[FillRead])
-async def list_fills(container: ServiceContainer = Depends(get_container), limit: int = 100) -> list[FillRead]:
-    async with container.order_manager.session_factory() as session:
-        result = await session.execute(select(Fill).order_by(Fill.filled_at.desc()).limit(limit))
-        return list(result.scalars().all())
+async def list_fills(
+    container: ServiceContainer = Depends(get_container),
+    limit: int = 100,
+) -> list[FillRead]:
+    return list(await container.fills.list_recent(limit))
 
 
 @router.get("/positions", response_model=list[PositionRead])
-async def list_positions(container: ServiceContainer = Depends(get_container)) -> list[PositionRead]:
-    async with container.order_manager.session_factory() as session:
-        return await container.portfolio_service.list_positions(session)
+async def list_positions(
+    container: ServiceContainer = Depends(get_container),
+) -> list[PositionRead]:
+    return list(await container.positions.list_active())
 
 
 @router.post("/ops/kill-switch")
@@ -61,7 +60,8 @@ async def toggle_kill_switch(
     payload: RiskToggleRequest,
     container: ServiceContainer = Depends(get_container),
 ) -> dict:
-    async with container.order_manager.session_factory() as session:
+    from app.core.database import get_session_factory
+    async with get_session_factory()() as session:
         await container.risk_engine.set_kill_switch(
             session=session,
             engaged=payload.engaged,
@@ -76,12 +76,14 @@ async def toggle_kill_switch(
 
 @router.get("/risk/status")
 async def risk_status(container: ServiceContainer = Depends(get_container)) -> dict:
-    async with container.order_manager.session_factory() as session:
+    from app.core.database import get_session_factory
+    async with get_session_factory()() as session:
         return await container.risk_engine.status(session)
 
 
 @router.get("/decisions", response_model=list[DecisionLogRead])
-async def decision_logs(container: ServiceContainer = Depends(get_container), limit: int = 100) -> list[DecisionLogRead]:
-    async with container.order_manager.session_factory() as session:
-        result = await session.execute(select(DecisionLog).order_by(DecisionLog.created_at.desc()).limit(limit))
-        return list(result.scalars().all())
+async def decision_logs(
+    container: ServiceContainer = Depends(get_container),
+    limit: int = 100,
+) -> list[DecisionLogRead]:
+    return list(await container.decisions.list_recent(limit))

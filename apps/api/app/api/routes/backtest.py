@@ -89,7 +89,7 @@ async def run_backtest_endpoint(
     (synthetic GBM by default; real data once Angel One feed is enabled).
     """
     symbol = req.symbol.upper()
-    closes = container.market_data_service.get_recent_closes(symbol, lookback=req.lookback)
+    closes = container.market_data.get_recent_closes(symbol, lookback=req.lookback)
     if len(closes) < req.slow_window + 10:
         raise HTTPException(
             status_code=400,

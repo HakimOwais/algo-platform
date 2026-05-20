@@ -1,0 +1,43 @@
+"""Repository Protocols — data-access contracts consumed by services and routes.
+
+Services and API routes depend on these interfaces only.
+Concrete SQLAlchemy implementations live in infra/persistence/repositories.py.
+This keeps the domain and service layers free of SQLAlchemy imports.
+"""
+from __future__ import annotations
+
+from typing import Protocol, Sequence
+
+from app.models.decision_log import DecisionLog
+from app.models.fill import Fill
+from app.models.order import Order
+from app.models.position import Position
+from app.models.strategy import StrategyConfig
+
+
+class OrderRepo(Protocol):
+    async def list_recent(self, limit: int = 100) -> Sequence[Order]: ...
+    async def open_count(self) -> int: ...
+
+
+class FillRepo(Protocol):
+    async def list_recent(self, limit: int = 50) -> Sequence[Fill]: ...
+
+
+class PositionRepo(Protocol):
+    async def list_active(self) -> Sequence[Position]: ...
+    async def held_qty(self, symbol: str) -> int: ...
+    async def total_realized_pnl(self) -> float: ...
+    async def apply_fill(self, order: Order, fill: Fill) -> None: ...
+
+
+class DecisionRepo(Protocol):
+    async def list_recent(self, limit: int = 100) -> Sequence[DecisionLog]: ...
+    async def record(self, decision: DecisionLog) -> None: ...
+
+
+class StrategyRepo(Protocol):
+    async def get_active(self, names: tuple[str, ...]) -> StrategyConfig | None: ...
+    async def get_by_name(self, name: str) -> StrategyConfig | None: ...
+    async def save(self, strategy: StrategyConfig) -> StrategyConfig: ...
+    async def list_all(self) -> Sequence[StrategyConfig]: ...

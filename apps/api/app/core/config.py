@@ -25,6 +25,7 @@ class Settings:
     default_broker: str = "paper"
     symbol_universe: str = "RELIANCE,TCS,INFY,HDFCBANK,ICICIBANK"
 
+    initial_capital_inr: float = 1_000_000.0
     max_daily_loss_inr: float = 5000.0
     max_position_notional_inr: float = 100000.0
     max_open_orders: int = 20
@@ -41,11 +42,26 @@ class Settings:
     angel_one_client_code: str = ""
     angel_one_pin: str = ""
     angel_one_totp_secret: str = ""
+    angel_one_symbol_tokens: str = ""  # "RELIANCE:2885,TCS:11536,INFY:1594,HDFCBANK:1333,ICICIBANK:4963"
+    angel_one_poll_interval: float = 3.0
 
     @property
     def symbols(self) -> list[str]:
         symbols = [part.strip().upper() for part in self.symbol_universe.split(",")]
         return [symbol for symbol in symbols if symbol]
+
+    @property
+    def angel_one_tokens(self) -> dict[str, str]:
+        """Parse 'SYMBOL:TOKEN,...' into {SYMBOL: token} mapping."""
+        if not self.angel_one_symbol_tokens:
+            return {}
+        result = {}
+        for pair in self.angel_one_symbol_tokens.split(","):
+            pair = pair.strip()
+            if ":" in pair:
+                symbol, token = pair.split(":", 1)
+                result[symbol.strip().upper()] = token.strip()
+        return result
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -63,6 +79,7 @@ class Settings:
             ),
             default_broker=os.getenv("DEFAULT_BROKER", cls.default_broker),
             symbol_universe=os.getenv("SYMBOL_UNIVERSE", cls.symbol_universe),
+            initial_capital_inr=float(os.getenv("INITIAL_CAPITAL_INR", cls.initial_capital_inr)),
             max_daily_loss_inr=float(os.getenv("MAX_DAILY_LOSS_INR", cls.max_daily_loss_inr)),
             max_position_notional_inr=float(
                 os.getenv("MAX_POSITION_NOTIONAL_INR", cls.max_position_notional_inr)
@@ -84,6 +101,10 @@ class Settings:
             angel_one_client_code=os.getenv("ANGEL_ONE_CLIENT_CODE", cls.angel_one_client_code),
             angel_one_pin=os.getenv("ANGEL_ONE_PIN", cls.angel_one_pin),
             angel_one_totp_secret=os.getenv("ANGEL_ONE_TOTP_SECRET", cls.angel_one_totp_secret),
+            angel_one_symbol_tokens=os.getenv("ANGEL_ONE_SYMBOL_TOKENS", cls.angel_one_symbol_tokens),
+            angel_one_poll_interval=float(
+                os.getenv("ANGEL_ONE_POLL_INTERVAL", cls.angel_one_poll_interval)
+            ),
         )
 
 

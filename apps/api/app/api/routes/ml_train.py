@@ -74,7 +74,7 @@ async def train_model(
     all_labels: list[int] = []
 
     for sym in symbols:
-        closes = container.market_data_service.get_recent_closes(sym, lookback=req.lookback)
+        closes = container.market_data.get_recent_closes(sym, lookback=req.lookback)
         if len(closes) < 60:
             continue
         # Use closes as proxy for H/L/V when not separately stored
@@ -148,7 +148,7 @@ async def predict_signal(
     sym = symbol.upper()
     clf = get_classifier()
 
-    closes = container.market_data_service.get_recent_closes(sym, lookback=256)
+    closes = container.market_data.get_recent_closes(sym, lookback=256)
     if len(closes) < 30:
         raise HTTPException(status_code=400, detail=f"Insufficient history for {sym}")
 

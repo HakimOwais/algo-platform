@@ -2,7 +2,7 @@
 Vectorized backtester with real NSE transaction cost model.
 
 Features:
-- Accurate NSE costs: STT, exchange fee, SEBI turnover fee, GST, stamp duty, brokerage
+- Accurate NSE costs via quant.costs (single source of truth)
 - Point-in-time signal evaluation (executes on next bar's open, no look-ahead)
 - Long-only (no shorting in paper mode)
 - Full performance report: Sharpe, Sortino, max drawdown, win rate, profit factor
@@ -14,26 +14,7 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-# ── NSE transaction cost constants (as of 2024) ─────────────────────────────
-_BROKERAGE_PCT    = 0.0003   # 0.03% or ₹20 cap (flat-fee broker like Zerodha)
-_BROKERAGE_CAP    = 20.0     # ₹20 per order
-_STT_SELL         = 0.001    # 0.1% STT on delivery sell-side
-_EXCHANGE_FEE     = 0.0000335  # NSE transaction charge
-_SEBI_FEE         = 0.000001   # SEBI turnover fee
-_STAMP_BUY        = 0.00015    # Stamp duty on buy
-_GST_RATE         = 0.18       # GST on brokerage + exchange fees
-
-
-def nse_cost(price: float, qty: int, side: str) -> float:
-    """Compute total NSE transaction cost for one order (₹)."""
-    notional = price * qty
-    brokerage = min(notional * _BROKERAGE_PCT, _BROKERAGE_CAP)
-    stt = notional * _STT_SELL if side.upper() == "SELL" else 0.0
-    exchange_fee = notional * _EXCHANGE_FEE
-    sebi_fee = notional * _SEBI_FEE
-    gst = (brokerage + exchange_fee) * _GST_RATE
-    stamp = notional * _STAMP_BUY if side.upper() == "BUY" else 0.0
-    return brokerage + stt + exchange_fee + sebi_fee + gst + stamp
+from app.quant.costs import nse_cost
 
 
 @dataclass
@@ -53,11 +34,11 @@ class Trade:
 @dataclass
 class BacktestResult:
     symbol: str
-    total_return: float          # decimal, e.g. 0.23 = 23%
+    total_return: float
     annualised_return: float
-    sharpe_ratio: float          # annualised
-    sortino_ratio: float         # annualised, downside deviation
-    max_drawdown: float          # decimal, e.g. 0.15 = 15%
+    sharpe_ratio: float
+    sortino_ratio: float
+    max_drawdown: float
     win_rate: float
     profit_factor: float
     total_trades: int
@@ -72,8 +53,8 @@ class BacktestResult:
 
 
 SignalFn = Callable[
-    [list[float], list[float], list[float], list[float]],  # closes, highs, lows, volumes
-    int,                                                    # +1 long, 0 flat
+    [list[float], list[float], list[float], list[float]],
+    int,
 ]
 
 
@@ -108,7 +89,7 @@ def run_backtest(
 
     slippage = slippage_bps / 10_000.0
     capital = initial_capital
-    position = 0        # 0=flat, 1=long
+    position = 0
     entry_price = 0.0
     entry_bar = 0
     trades: list[Trade] = []
@@ -144,12 +125,9 @@ def run_backtest(
             ))
             position = 0
 
-        nav = capital
-        if position == 1:
-            nav += (closes[t + 1] - entry_price) * trade_qty
+        nav = capital + (closes[t + 1] - entry_price) * trade_qty if position == 1 else capital
         equity.append(nav)
 
-    # Close open position at last bar
     if position == 1:
         fill = closes[-1] * (1.0 - slippage)
         cost = nse_cost(fill, trade_qty, "SELL")
@@ -166,7 +144,6 @@ def run_backtest(
         ))
         equity.append(capital)
 
-    # ── Performance metrics ───────────────────────────────────────────────
     bar_rets = [
         (equity[i] / equity[i - 1]) - 1.0
         for i in range(1, len(equity))
@@ -174,28 +151,22 @@ def run_backtest(
     ]
 
     total_ret = (equity[-1] / initial_capital) - 1.0 if initial_capital > 0 else 0.0
-
     n_bars = len(equity) - 1
     ann_ret = (
         (1.0 + total_ret) ** (bars_per_year / max(n_bars, 1)) - 1.0
-        if n_bars > 0
-        else 0.0
+        if n_bars > 0 else 0.0
     )
 
     if bar_rets:
         mu = sum(bar_rets) / len(bar_rets)
-        sigma = math.sqrt(
-            sum((r - mu) ** 2 for r in bar_rets) / max(len(bar_rets) - 1, 1)
-        )
+        sigma = math.sqrt(sum((r - mu) ** 2 for r in bar_rets) / max(len(bar_rets) - 1, 1))
         sharpe = _safe_div(mu, sigma) * math.sqrt(bars_per_year)
-
         neg = [r for r in bar_rets if r < 0]
         down_std = math.sqrt(sum(r ** 2 for r in neg) / len(neg)) if neg else sigma
         sortino = _safe_div(mu, down_std) * math.sqrt(bars_per_year)
     else:
         sharpe = sortino = 0.0
 
-    # Max drawdown
     peak = equity[0]
     max_dd = 0.0
     for v in equity:
@@ -209,8 +180,6 @@ def run_backtest(
     gross_profit = sum(t.net_pnl for t in wins)
     gross_loss   = abs(sum(t.net_pnl for t in losses))
     profit_factor = _safe_div(gross_profit, gross_loss, default=float("inf") if wins else 0.0)
-    avg_pnl  = sum(t.net_pnl for t in trades) / max(len(trades), 1)
-    avg_held = sum(t.bars_held for t in trades) / max(len(trades), 1)
 
     return BacktestResult(
         symbol=symbol,
@@ -222,8 +191,8 @@ def run_backtest(
         win_rate=win_rate,
         profit_factor=profit_factor,
         total_trades=len(trades),
-        avg_bars_held=avg_held,
-        avg_net_pnl=avg_pnl,
+        avg_bars_held=sum(t.bars_held for t in trades) / max(len(trades), 1),
+        avg_net_pnl=sum(t.net_pnl for t in trades) / max(len(trades), 1),
         total_costs=total_costs,
         final_nav=equity[-1],
         initial_capital=initial_capital,
@@ -233,16 +202,14 @@ def run_backtest(
     )
 
 
-def ema_cross_signal_fn(
-    fast: int = 8, slow: int = 21
-) -> SignalFn:
+def ema_cross_signal_fn(fast: int = 8, slow: int = 21) -> SignalFn:
     """Return a simple EMA-crossover signal function for use as a backtest baseline."""
     def _fn(closes: list[float], highs: list[float], lows: list[float], volumes: list[float]) -> int:
         if len(closes) < slow:
             return 0
         k_fast = 2.0 / (fast + 1)
         k_slow = 2.0 / (slow + 1)
-        ema_f = closes[0]; ema_s = closes[0]
+        ema_f = ema_s = closes[0]
         for c in closes[1:]:
             ema_f = c * k_fast + ema_f * (1.0 - k_fast)
             ema_s = c * k_slow + ema_s * (1.0 - k_slow)
