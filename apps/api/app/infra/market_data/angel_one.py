@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -60,6 +61,7 @@ class AngelOneMarketData(MarketDataBase):
         self._refresh_token: str | None = None
         self._last_cleared_ist_date: str | None = None
         self._session_refresh_task: asyncio.Task | None = None
+        self._last_reauth_time: float = 0.0
 
     # ── Lifecycle overrides ────────────────────────────────────────────────
 
@@ -95,7 +97,7 @@ class AngelOneMarketData(MarketDataBase):
                 continue
             try:
                 data = await loop.run_in_executor(
-                    None, lambda s=symbol, t=token: self._client.ltpData("NSE", s, t)
+                    None, lambda s=symbol, t=token: self._ltp_data(s, t)
                 )
             except Exception:
                 logger.exception("Error polling LTP for %s", symbol)
@@ -152,6 +154,30 @@ class AngelOneMarketData(MarketDataBase):
         self._refresh_token = resp.get("data", {}).get("refreshToken")
         logger.info("Angel One session authenticated")
 
+    @staticmethod
+    def _is_invalid_token_response(response: dict) -> bool:
+        if not isinstance(response, dict):
+            return False
+        if response.get("errorCode") == "AG8001":
+            return True
+        msg = str(response.get("message", "")).lower()
+        return "invalid token" in msg or "token expired" in msg
+
+    def _ltp_data(self, symbol: str, token: str) -> dict:
+        if self._client is None:
+            raise RuntimeError("Angel One client is not authenticated")
+        data = self._client.ltpData("NSE", symbol, token)
+        if self._is_invalid_token_response(data):
+            now = time.monotonic()
+            if now - self._last_reauth_time > 60:
+                logger.warning(
+                    "Invalid token for %s (AG8001); forcing full re-auth.", symbol
+                )
+                self._authenticate()
+                self._last_reauth_time = now
+            data = self._client.ltpData("NSE", symbol, token)
+        return data
+
     def _refresh_session(self) -> None:
         if self._client is None or not self._refresh_token:
             logger.warning("No existing session; performing full re-auth.")
@@ -194,7 +220,7 @@ class AngelOneMarketData(MarketDataBase):
                 continue
             try:
                 data = await loop.run_in_executor(
-                    None, lambda s=symbol, t=token: self._client.ltpData("NSE", s, t)
+                    None, lambda s=symbol, t=token: self._ltp_data(s, t)
                 )
                 if data.get("status") and data.get("data"):
                     ltp = round(float(data["data"]["ltp"]), 2)

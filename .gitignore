@@ -28,7 +28,7 @@ logs/
 .DS_Store
 Thumbs.db
 .vscode/
-.idea/
+.idea/ 
 
 # Data
 data/
